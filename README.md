@@ -1,4 +1,4 @@
-# Ipê package index
+# Ipê package registry
 
 The curated index of publishable [Ipê](https://github.com/arthurmaciel/ipe-lang)
 packages. It is a plain git repository: one file per package at
