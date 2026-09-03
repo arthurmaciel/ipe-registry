@@ -50,3 +50,22 @@ ipe add http-extras@^1.2       # a version request
 ```
 
 See `CONTRIBUTING.md` for the full submission flow.
+
+## Static read API
+
+The curated TOML is the source of truth; the resolver reads a JSON mirror of it,
+published to GitHub Pages by `.github/workflows/pages.yml` on every push to main
+(`.github/scripts/generate_site.py` renders `packages/` and `advisories/` into
+`_site/`). The read paths a client fetches:
+
+| Path | Content |
+| --- | --- |
+| `index.json` | Discovery catalogue: `{ packages: [ { name, publisher, latest } ] }`. |
+| `packages/<name>.json` | One entry: `{ publisher, versions: [ { version, source, rev, sha256, capabilities } ] }` — a faithful mirror of `packages/<name>.toml`. |
+| `advisories/index.json` | `{ advisories: [ { id, package } ] }` (empty until advisories land). |
+| `advisories/<id>.json` | One advisory record. |
+
+The resolver's default base is overridable with `IPE_REGISTRY_URL`. The generator
+translates format only — it never invents or drops a field; where its JSON and
+the resolver parser (`src/ipe-cli/src/{index,advisory}.rs`) disagree, the parser
+governs and the mismatch is a generator bug.
