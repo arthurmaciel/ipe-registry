@@ -2,7 +2,7 @@
 
 1. **Fork** this repository (or branch, if you have write access).
 2. **Add or edit** `packages/<name>.toml` for your package. For a new version,
-   append a `[[versions]]` block; never edit or delete a published version (they
+   append a `[[version]]` block; never edit or delete a published version (they
    are immutable — a build may be locked to one).
    - `rev` must be an exact, immutable git commit (not a branch or tag ref).
    - `sha256` is the hash `ipe` computes over the fetched source tree. `ipe

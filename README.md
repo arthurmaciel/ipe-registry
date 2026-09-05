@@ -8,7 +8,7 @@ revision, a content hash, and a declared capability set.
 `ipe add <name>` resolves a dependency through this index — it reads the entry,
 picks the highest version matching your request, `git fetch`es the source at the
 pinned revision, verifies the tree's `sha256` against the pin, writes the
-lockfile, and records the dependency in `ipe.toml`. Once locked, a build is
+lockfile, and records the dependency in `package.ipe`. Once locked, a build is
 reproducible from the lockfile alone; the index need not be reachable.
 
 ## Entry schema — `packages/<name>.toml`
@@ -17,7 +17,7 @@ reproducible from the lockfile alone; the index need not be reachable.
 name = "http-extras"          # must match the file stem
 publisher = "arthurmaciel"    # the GitHub account vouching for this entry
 
-[[versions]]
+[[version]]
 version = "1.2.0"                                       # semver
 source = "https://github.com/arthurmaciel/http-extras" # git remote
 rev = "9f2c1a7e0b…"                                     # exact commit (pinned)
@@ -27,7 +27,8 @@ capabilities = ["network"]                             # declared capability set
 
 `capabilities` is the set the package's code exercises (inferred for pure Ipê,
 declared for native `Rust.` code). `ipe add` surfaces it for consent at install —
-loudly when it includes `native-ffi`.
+loudly when it includes `native-ffi`. See `SCHEMA.md` for the full schema,
+including the optional per-version `signature`.
 
 ## Submitting a package
 
@@ -42,10 +43,17 @@ cannot establish on any platform, rejects — never a warning.
 The trust model — admission is the boundary we enforce; execution is the user's
 consented choice — is recorded in the language repo's ADRs 0040 and 0041.
 
+## Advisories
+
+Security advisories live under `advisories/<package>/<id>.toml` and are mirrored
+to the JSON read path (`/advisories/index.json`, `/advisories/<id>.json`) that
+`ipe add` consults to warn or fail-closed on a vulnerable dependency version.
+See `ADVISORIES.md` for the schema.
+
 ## Consuming the index
 
 ```
-ipe add http-extras            # resolve latest matching, lock, record in ipe.toml
+ipe add http-extras            # resolve latest matching, lock, record in package.ipe
 ipe add http-extras@^1.2       # a version request
 ```
 
