@@ -9,6 +9,7 @@
 import json
 import pathlib
 import re
+import shutil
 import sys
 
 try:
@@ -39,8 +40,27 @@ def nonempty_str(v):
     return isinstance(v, str) and v != ""
 
 
+def _semver_key(s):
+    # Order by (major, minor, patch), then release > pre-release (a pre-release
+    # sorts below its final). Falls back to a low key for anything unparsable so a
+    # surprising string never crashes the summary — the CLI parser is the real gate.
+    core, _, pre = s.partition("-")
+    parts = core.split(".")
+    nums = []
+    for part in parts[:3]:
+        nums.append(int(part) if part.isdigit() else -1)
+    while len(nums) < 3:
+        nums.append(0)
+    return (nums[0], nums[1], nums[2], 0 if pre else 1, pre)
+
+
+def latest_semver(versions):
+    return max(versions, key=_semver_key) if versions else None
+
+
 # --- packages: publisher + versions[] (remap the [[version]] array-of-tables) --------
 pkgs = 0
+catalogue = []                                  # one summary row per package, for the search UI
 for p in sorted((ROOT / "packages").glob("*.toml")):
     raw = load(p)
     versions = raw.get("versions", raw.get("version", []))
@@ -67,11 +87,23 @@ for p in sorted((ROOT / "packages").glob("*.toml")):
         if "signature" in v:              # carry the signature bundle through verbatim
             entry["signature"] = v["signature"]
         out_versions.append(entry)
+    name = raw.get("name", p.stem)
     (SITE / "packages" / (p.stem + ".json")).write_text(
-        json.dumps({"name": raw.get("name", p.stem),
+        json.dumps({"name": name,
                     "publisher": raw.get("publisher"),
                     "versions": out_versions}, indent=2))
     pkgs += 1
+    # Summary row for the search UI. The authoritative name is the file stem;
+    # capabilities are the union across every published version.
+    caps_union = sorted({c for ev in out_versions for c in ev["capabilities"]})
+    catalogue.append({
+        "name": p.stem,
+        "latest_version": latest_semver([ev["version"] for ev in out_versions]),
+        "versions_count": len(out_versions),
+        "capabilities": caps_union,
+        "publisher": raw.get("publisher"),
+        "has_advisory": False,          # filled in after the advisory pass below
+    })
 
 # --- advisories: nested advisories/<pkg>/<id>.toml -> flat records + object index -----
 records = []
@@ -106,9 +138,20 @@ for p in sorted((ROOT / "advisories").glob("*/*.toml")):     # nested only
 
 (SITE / "advisories" / "index.json").write_text(
     json.dumps({"advisories": sorted(records, key=lambda r: r["id"])}, indent=2))
+
+# --- catalogue: one summary row per package for the static search UI -----------------
+advised = {r["package"] for r in records}
+for row in catalogue:
+    row["has_advisory"] = row["name"] in advised
+catalogue.sort(key=lambda r: r["name"])
+(SITE / "catalogue.json").write_text(json.dumps(catalogue, indent=2))
+
+# --- landing page: static search UI over catalogue.json (checked-in source) ----------
+shutil.copyfile(ROOT / "scripts" / "index.html", SITE / "index.html")
 (SITE / "index.json").write_text(json.dumps(
     {"registry": "ipe-registry",
-     "endpoints": ["/packages/<name>.json", "/advisories/index.json", "/advisories/<id>.json"]},
+     "endpoints": ["/packages/<name>.json", "/advisories/index.json",
+                   "/advisories/<id>.json", "/catalogue.json"]},
     indent=2))
 
 if errors:
@@ -116,4 +159,5 @@ if errors:
     for e in errors:
         print("  " + e, file=sys.stderr)
     sys.exit(1)
-print(f"built {pkgs} package JSON, {len(records)} advisory JSON")
+print(f"built {pkgs} package JSON, {len(records)} advisory JSON, "
+      f"{len(catalogue)} catalogue rows")
