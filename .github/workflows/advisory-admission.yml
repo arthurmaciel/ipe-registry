@@ -1,0 +1,70 @@
+name: advisory-admission
+
+# The receiving gate for the advisory database. A pull request touching
+# advisories/** merges only when every advisory is well-formed and correctly
+# placed. Two fail-closed checks run, deny-by-default:
+#
+#   1. `scripts/build_site.py` — the schema source of truth. It parses every
+#      nested advisories/<package>/<id>.toml, rejects any malformed or
+#      mis-placed record (id must equal the file stem, package must equal the
+#      parent directory, severity in the enum, non-empty affected/description,
+#      string fixed_in), and mirrors the tree to the JSON read API. A bad or
+#      flat-layout advisory fails the build here.
+#   2. `.github/scripts/validate_advisories.py` — the admission-only checks the
+#      builder does not do: every advisory names a real package under packages/,
+#      and no advisory published on the base branch has been deleted (advisories
+#      are immutable).
+#
+# Absent proof every advisory is well-formed, placed nested, names a real
+# package, and preserves history, the merge is blocked.
+
+on:
+  pull_request:
+    paths:
+      - 'advisories/**'
+      - 'packages/**'
+      - '.github/workflows/advisory-admission.yml'
+      - '.github/scripts/validate_advisories.py'
+      - 'scripts/build_site.py'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate schema + layout and mirror to JSON (fail-closed)
+        run: python3 scripts/build_site.py
+
+      - name: Materialise the base advisories/ tree
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          rm -rf .base-advisories
+          mkdir -p .base-advisories
+          # Copy each nested advisory file as it exists on the base branch, if any.
+          for f in $(git ls-tree -r --name-only "$base" -- 'advisories/*/*.toml' || true); do
+            mkdir -p ".base-advisories/$(dirname "$f")"
+            git show "$base:$f" > ".base-advisories/$f"
+          done
+
+      - name: Check package existence + immutability (fail-closed)
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/validate_advisories.py \
+            --advisories advisories \
+            --packages packages \
+            --base-advisories .base-advisories/advisories
