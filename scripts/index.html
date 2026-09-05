@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ipê package registry — search</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #16181d;
+    --muted: #5c6370;
+    --card: #f6f7f9;
+    --border: #d9dce1;
+    --accent: #2f6feb;
+    --accent-fg: #ffffff;
+    --chip: #e7ebf0;
+    --chip-fg: #2b3038;
+    --warn-bg: #fff4e5;
+    --warn-fg: #8a4b00;
+    --warn-border: #e0a56a;
+    --adv-bg: #fdecec;
+    --adv-fg: #a11212;
+    --adv-border: #e39898;
+    --focus: #2f6feb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --fg: #e6e8ec;
+      --muted: #9aa2ad;
+      --card: #171a20;
+      --border: #2a2f38;
+      --accent: #5b8cff;
+      --accent-fg: #0f1115;
+      --chip: #22262e;
+      --chip-fg: #cdd3db;
+      --warn-bg: #33260f;
+      --warn-fg: #ffca7a;
+      --warn-border: #6b4e1f;
+      --adv-bg: #351718;
+      --adv-fg: #ff9a9a;
+      --adv-border: #6b2b2c;
+      --focus: #5b8cff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  a { color: var(--accent); }
+  header, main, footer { max-width: 900px; margin: 0 auto; padding: 0 1rem; }
+  header { padding-top: 2rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; }
+  .controls {
+    position: sticky; top: 0; background: var(--bg);
+    padding: 1rem 0; border-bottom: 1px solid var(--border); z-index: 1;
+  }
+  .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: .25rem; flex: 1 1 220px; }
+  label { font-size: .85rem; color: var(--muted); }
+  input, select {
+    font: inherit; padding: .55rem .7rem; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+  }
+  input:focus-visible, select:focus-visible, a:focus-visible, button:focus-visible {
+    outline: 3px solid var(--focus); outline-offset: 2px;
+  }
+  .count { color: var(--muted); font-size: .9rem; margin: 1rem 0 .5rem; }
+  ul.results { list-style: none; padding: 0; margin: 0 0 2rem; display: grid; gap: .75rem; }
+  li.pkg {
+    border: 1px solid var(--border); background: var(--card);
+    border-radius: 10px; padding: 1rem;
+  }
+  .pkg-head { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+  .pkg-name { font-size: 1.15rem; font-weight: 600; }
+  .ver { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .meta { color: var(--muted); font-size: .9rem; margin: .35rem 0; }
+  .chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
+  .chip {
+    font-size: .8rem; padding: .2rem .55rem; border-radius: 999px;
+    background: var(--chip); color: var(--chip-fg); border: 1px solid transparent;
+  }
+  .chip.none { font-style: italic; }
+  .chip.native-ffi {
+    background: var(--warn-bg); color: var(--warn-fg);
+    border-color: var(--warn-border); font-weight: 600;
+  }
+  .badge-advisory {
+    font-size: .78rem; padding: .2rem .55rem; border-radius: 999px;
+    background: var(--adv-bg); color: var(--adv-fg); border: 1px solid var(--adv-border);
+    font-weight: 600;
+  }
+  .links { margin-top: .6rem; display: flex; gap: 1rem; font-size: .9rem; flex-wrap: wrap; }
+  .empty, .error { padding: 2rem 0; color: var(--muted); }
+  .error { color: var(--adv-fg); }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  footer { color: var(--muted); font-size: .85rem; padding: 2rem 1rem 3rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ipê package registry</h1>
+  <p class="lede">Search the curated index of publishable Ipê packages. Each entry
+    pins every version to an exact source revision, a content hash, and a declared
+    capability set.</p>
+</header>
+
+<main>
+  <section class="controls" aria-label="Search and filter">
+    <div class="row">
+      <div class="field">
+        <label for="q">Search by name</label>
+        <input id="q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="e.g. http" aria-describedby="count">
+      </div>
+      <div class="field">
+        <label for="cap">Filter by capability</label>
+        <select id="cap" aria-describedby="count">
+          <option value="">Any capability</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <p id="count" class="count" role="status" aria-live="polite"></p>
+
+  <ul id="results" class="results" aria-label="Packages"></ul>
+  <div id="message" aria-live="polite"></div>
+</main>
+
+<footer>
+  Data mirrored from the registry's <code>packages/*.toml</code> to
+  <a href="./catalogue.json">catalogue.json</a>. The <code>ipe</code> CLI reads
+  the per-package JSON directly; <code>ipe add</code> surfaces capabilities for
+  consent at install — loudly when a package declares <code>native-ffi</code>.
+</footer>
+
+<script>
+"use strict";
+(function () {
+  // Repo base for "source" links (the TOML that produced each row).
+  var SOURCE_BASE = "https://github.com/arthurmaciel/ipe-registry/blob/main/packages/";
+
+  var qEl = document.getElementById("q");
+  var capEl = document.getElementById("cap");
+  var resultsEl = document.getElementById("results");
+  var countEl = document.getElementById("count");
+  var messageEl = document.getElementById("message");
+  var catalogue = [];
+
+  // --- DOM builders: every data value goes through textContent / setAttribute,
+  //     never innerHTML — the catalogue is treated as untrusted input. ----------
+  function el(tag, className, text) {
+    var n = document.createElement(tag);
+    if (className) n.className = className;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function chip(cap) {
+    var c = el("span", "chip", cap);
+    if (cap === "native-ffi") {
+      c.classList.add("native-ffi");
+      c.setAttribute("title", "Crosses into native Rust code — capabilities cannot be inferred from Ipê alone.");
+    }
+    return c;
+  }
+
+  function card(pkg) {
+    var li = el("li", "pkg");
+
+    var head = el("div", "pkg-head");
+    var name = el("span", "pkg-name", pkg.name);
+    head.appendChild(name);
+    if (pkg.latest_version) head.appendChild(el("span", "ver", "v" + pkg.latest_version));
+    if (pkg.has_advisory) {
+      var badge = el("span", "badge-advisory", "advisory");
+      badge.setAttribute("role", "img");
+      badge.setAttribute("aria-label", "has a security advisory");
+      head.appendChild(badge);
+    }
+    li.appendChild(head);
+
+    var meta = el("p", "meta");
+    var pub = pkg.publisher ? "published by " + pkg.publisher : "publisher unknown";
+    var vc = pkg.versions_count === 1 ? "1 version" : pkg.versions_count + " versions";
+    meta.textContent = pub + " · " + vc;
+    li.appendChild(meta);
+
+    var chips = el("div", "chips");
+    chips.setAttribute("aria-label", "capabilities");
+    if (pkg.capabilities && pkg.capabilities.length) {
+      pkg.capabilities.forEach(function (cap) { chips.appendChild(chip(cap)); });
+    } else {
+      chips.appendChild(el("span", "chip none", "no capabilities"));
+    }
+    li.appendChild(chips);
+
+    var links = el("div", "links");
+    var json = el("a", null, "JSON entry");
+    json.setAttribute("href", "./packages/" + encodeURIComponent(pkg.name) + ".json");
+    var src = el("a", null, "source TOML");
+    src.setAttribute("href", SOURCE_BASE + encodeURIComponent(pkg.name) + ".toml");
+    src.setAttribute("rel", "noopener");
+    links.appendChild(json);
+    links.appendChild(src);
+    li.appendChild(links);
+
+    return li;
+  }
+
+  function render() {
+    var q = qEl.value.trim().toLowerCase();
+    var cap = capEl.value;
+    var shown = catalogue.filter(function (p) {
+      var nameMatch = !q || p.name.toLowerCase().indexOf(q) !== -1;
+      var capMatch = !cap || (p.capabilities && p.capabilities.indexOf(cap) !== -1);
+      return nameMatch && capMatch;
+    });
+
+    resultsEl.textContent = "";
+    if (!shown.length) {
+      countEl.textContent = "No packages match.";
+      return;
+    }
+    var total = catalogue.length;
+    countEl.textContent = shown.length === total
+      ? shown.length + (total === 1 ? " package" : " packages")
+      : "Showing " + shown.length + " of " + total + " packages";
+    var frag = document.createDocumentFragment();
+    shown.forEach(function (p) { frag.appendChild(card(p)); });
+    resultsEl.appendChild(frag);
+  }
+
+  function populateCapabilities() {
+    var set = {};
+    catalogue.forEach(function (p) {
+      (p.capabilities || []).forEach(function (c) { set[c] = true; });
+    });
+    Object.keys(set).sort().forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = c;
+      opt.textContent = c;
+      capEl.appendChild(opt);
+    });
+  }
+
+  qEl.addEventListener("input", render);
+  capEl.addEventListener("change", render);
+
+  fetch("./catalogue.json", { cache: "no-cache" })
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (data) {
+      if (!Array.isArray(data)) throw new Error("catalogue.json is not an array");
+      catalogue = data;
+      populateCapabilities();
+      render();
+    })
+    .catch(function (err) {
+      messageEl.className = "error";
+      messageEl.textContent = "Could not load the package catalogue: " + err.message;
+      countEl.textContent = "";
+    });
+})();
+</script>
+</body>
+</html>
