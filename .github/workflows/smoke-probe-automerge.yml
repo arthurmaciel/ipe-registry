@@ -1,0 +1,53 @@
+name: smoke-probe auto-merge
+
+# The admission gate CHECKS a publish PR; it never merges it. The nightly
+# registry-publish smoke (in ipe-lang) needs its disposable probe entry to
+# actually land in the index so the Pages read API resolves it — otherwise the
+# smoke fails closed after its resolution timeout with the PR left unmerged.
+#
+# This arms GitHub auto-merge for — and ONLY for — a PR whose diff is EXACTLY
+# the reserved `ipe-registry-smoke-probe` entry (its publish PR and its cleanup
+# PR both qualify: each touches that one file and nothing else). The probe then
+# merges the instant the required `audit` gate is green, and the smoke can
+# resolve + clean up. Every other publish PR is untouched and still requires a
+# maintainer merge — the human gate on what enters the index stays in place.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'packages/ipe-registry-smoke-probe.toml'
+
+# Auto-merge waits for branch protection's required `audit` check; this token
+# only ARMS it. Write scopes are the minimum to enable auto-merge on the PR.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: smoke-probe-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  arm:
+    name: arm auto-merge for the reserved probe entry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Arm auto-merge ONLY for a probe-only PR (fail-closed otherwise)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Fail-closed guard: the PR must change EXACTLY the reserved probe
+          # entry and nothing else. A PR that also touches any other path is NOT
+          # armed — it drops to the normal maintainer-merge path. This is what
+          # keeps the auto-merge from being a foothold for an arbitrary change.
+          changed="$(gh pr diff "$PR" --name-only)"
+          printf 'changed files:\n%s\n' "$changed"
+          if [ "$changed" != "packages/ipe-registry-smoke-probe.toml" ]; then
+            echo "PR #$PR is not a probe-only change — not arming auto-merge (maintainer merge required)."
+            exit 0
+          fi
+          gh pr merge "$PR" --auto --squash
+          echo "auto-merge (squash) armed for probe PR #$PR — merges once the audit gate is green."
