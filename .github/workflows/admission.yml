@@ -22,12 +22,13 @@ on:
 permissions:
   contents: read
 
-# The single pinned toolchain version. Advancing native-package certification is
-# a one-line bump here to a release carrying the Tier-2 reachability fix; until
-# then a native-bearing entry fails closed (the safe outcome — the index admits
-# no native code whose build-time reach has not been confined and proven).
+# The single pinned toolchain version: an exact, integrity-verified release so the
+# wall the index enforces is byte-identical to the one `ipe package publish`
+# previews. It must be a release whose manifest reader matches the current
+# `package.ipe` project format and whose Tier-2 native confinement is proven;
+# advancing it is a one-line bump here.
 env:
-  IPE_VERSION: ipe-v0.1.55
+  IPE_VERSION: ipe-v0.1.79
 
 jobs:
   changed:
@@ -90,6 +91,14 @@ jobs:
           got="$(ipe --version | awk 'NF{print $NF; exit}')"
           want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
+      # cargo-deny performs the supply-chain half of the Tier-1 audit — RUSTSEC
+      # advisory + bans enforcement over the package's Rust dependency graph.
+      # Absent it, `ipe package audit` skips that scan with a warning instead of
+      # failing closed, so the gate MUST provide it (defense in depth).
+      - name: Install cargo-deny (supply-chain advisory + bans enforcement)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
       - name: Install the native Tier-2 sandbox primitives
         run: |
           set -euo pipefail
@@ -143,6 +152,12 @@ jobs:
           got="$(ipe --version | awk 'NF{print $NF; exit}')"
           want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
+      # The macOS re-audit runs the full Tier-1 audit too; give it the same
+      # supply-chain enforcer so the scan runs rather than skipping with a warning.
+      - name: Install cargo-deny (supply-chain advisory + bans enforcement)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
       - name: Re-audit each native-bearing entry under the macOS jail (fail closed)
