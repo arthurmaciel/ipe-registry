@@ -43,7 +43,9 @@ jobs:
           # entry and nothing else. A PR that also touches any other path is NOT
           # armed — it drops to the normal maintainer-merge path. This is what
           # keeps the auto-merge from being a foothold for an arbitrary change.
-          changed="$(gh pr diff "$PR" --name-only)"
+          # Use the API file list (not `gh pr diff`, which shells out to git and
+          # needs a checkout this job deliberately does not do).
+          changed="$(gh pr view "$PR" --json files --jq '.files[].path')"
           printf 'changed files:\n%s\n' "$changed"
           if [ "$changed" != "packages/ipe-registry-smoke-probe.toml" ]; then
             echo "PR #$PR is not a probe-only change — not arming auto-merge (maintainer merge required)."
