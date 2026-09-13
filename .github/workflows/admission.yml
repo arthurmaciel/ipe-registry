@@ -98,7 +98,10 @@ jobs:
       - name: Install cargo-deny (supply-chain advisory + bans enforcement)
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          # Pinned to match the pinned IPE_VERSION's `ipe package audit` cargo-deny
+          # CLI: 0.20 moved `--config` off the `check` subcommand, so an unpinned
+          # "latest" breaks the supply-chain leg. Advance in lockstep with IPE_VERSION.
+          tool: cargo-deny@0.19.9
       - name: Install the native Tier-2 sandbox primitives
         run: |
           set -euo pipefail
@@ -157,7 +160,10 @@ jobs:
       - name: Install cargo-deny (supply-chain advisory + bans enforcement)
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          # Pinned to match the pinned IPE_VERSION's `ipe package audit` cargo-deny
+          # CLI: 0.20 moved `--config` off the `check` subcommand, so an unpinned
+          # "latest" breaks the supply-chain leg. Advance in lockstep with IPE_VERSION.
+          tool: cargo-deny@0.19.9
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
       - name: Re-audit each native-bearing entry under the macOS jail (fail closed)
