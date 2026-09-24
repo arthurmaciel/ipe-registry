@@ -5,53 +5,80 @@ name: smoke-probe auto-merge
 # actually land in the index so the Pages read API resolves it — otherwise the
 # smoke fails closed after its resolution timeout with the PR left unmerged.
 #
-# This arms GitHub auto-merge for — and ONLY for — a PR whose diff is EXACTLY
-# the reserved `ipe-registry-smoke-probe` entry (its publish PR and its cleanup
-# PR both qualify: each touches that one file and nothing else). The probe then
-# merges the instant the required `audit` gate is green, and the smoke can
-# resolve + clean up. Every other publish PR is untouched and still requires a
-# maintainer merge — the human gate on what enters the index stays in place.
+# Why a DIRECT merge, not armed auto-merge: `main` here requires signed commits.
+# GitHub's auto-merge does not reliably complete a squash under that protection —
+# an armed `--auto` merge sits pending indefinitely even after the required
+# `audit` check goes green, because the squash commit is produced on a bot's
+# behalf. A direct merge, by contrast, is created and web-flow-signed
+# synchronously and so satisfies the signature requirement. This workflow
+# therefore runs AFTER the admission gate concludes green and merges the probe
+# PR directly.
+#
+# Fail-closed on every axis:
+#   - only when the admission run CONCLUDED success (a rejected/failed audit
+#     never reaches the merge — this is what keeps the negative-leg bad probe,
+#     whose admission fails, from ever landing);
+#   - only for a publish branch of the reserved probe (the `if` below);
+#   - and only when the PR's diff is EXACTLY the reserved probe entry and nothing
+#     else (the guard below). A real package PR — or a probe PR that also touches
+#     any other path — is left for the maintainer-merge path. The human gate on
+#     what enters the index stays in place.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'packages/ipe-registry-smoke-probe.toml'
+  workflow_run:
+    workflows: ["admission"]
+    types: [completed]
 
-# Auto-merge waits for branch protection's required `audit` check; this token
-# only ARMS it. Write scopes are the minimum to enable auto-merge on the PR.
+# The direct merge needs contents:write; pull-requests:write to read/merge the PR.
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: smoke-probe-automerge-${{ github.event.pull_request.number }}
+  group: smoke-probe-automerge-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
-  arm:
-    name: arm auto-merge for the reserved probe entry
+  merge:
+    name: merge the reserved probe entry once admission is green
+    # Only a GREEN admission run for a reserved-probe publish branch is eligible.
+    # The bad-probe branch (`...-probe-bad-*`) also matches this prefix, but its
+    # admission concludes failure, so the success guard turns it away; the
+    # exact-file guard below is the second, independent line of defense.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'publish/ipe-registry-smoke-probe')
     runs-on: ubuntu-latest
     steps:
-      - name: Arm auto-merge ONLY for a probe-only PR (fail-closed otherwise)
+      - name: Direct-merge ONLY a probe-only PR (fail-closed otherwise)
         env:
           GH_TOKEN: ${{ github.token }}
-          # GH_REPO makes every `gh` call resolve the repo over the API, so this
-          # job needs no `actions/checkout`: both `gh pr view` and `gh pr merge`
-          # otherwise shell out to git and fail with "not a git repository".
+          # GH_REPO makes every `gh` call resolve over the API, so this job needs
+          # no `actions/checkout`: `gh pr {list,view,merge}` otherwise shell out to
+          # git and fail with "not a git repository".
           GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          # Fail-closed guard: the PR must change EXACTLY the reserved probe
-          # entry and nothing else. A PR that also touches any other path is NOT
-          # armed — it drops to the normal maintainer-merge path. This is what
-          # keeps the auto-merge from being a foothold for an arbitrary change.
+          # Resolve the open PR for this publish branch. Absent (already merged or
+          # closed by the smoke's cleanup) → nothing to do.
+          PR="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR" ]; then
+            echo "no open PR for $HEAD_BRANCH — nothing to merge (already merged/closed)."
+            exit 0
+          fi
+          # Fail-closed guard: the PR must change EXACTLY the reserved probe entry
+          # and nothing else, or it drops to the maintainer-merge path. This is
+          # what keeps the merge from being a foothold for an arbitrary change.
           changed="$(gh pr view "$PR" --json files --jq '.files[].path')"
           printf 'changed files:\n%s\n' "$changed"
           if [ "$changed" != "packages/ipe-registry-smoke-probe.toml" ]; then
-            echo "PR #$PR is not a probe-only change — not arming auto-merge (maintainer merge required)."
+            echo "PR #$PR is not a probe-only change — not merging (maintainer merge required)."
             exit 0
           fi
-          gh pr merge "$PR" --auto --squash
-          echo "auto-merge (squash) armed for probe PR #$PR — merges once the audit gate is green."
+          # Direct squash merge: GitHub creates + web-flow-signs the squash commit
+          # synchronously, satisfying "require signed commits" where an armed
+          # `--auto` merge stalls. Branch protection still enforces the required
+          # `audit` check — this call fails (loud) if it is not green.
+          gh pr merge "$PR" --squash
+          echo "probe PR #$PR squash-merged."
