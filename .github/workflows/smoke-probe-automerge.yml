@@ -5,14 +5,15 @@ name: smoke-probe auto-merge
 # actually land in the index so the Pages read API resolves it — otherwise the
 # smoke fails closed after its resolution timeout with the PR left unmerged.
 #
-# Why a DIRECT merge, not armed auto-merge: `main` here requires signed commits.
-# GitHub's auto-merge does not reliably complete a squash under that protection —
-# an armed `--auto` merge sits pending indefinitely even after the required
-# `audit` check goes green, because the squash commit is produced on a bot's
-# behalf. A direct merge, by contrast, is created and web-flow-signed
-# synchronously and so satisfies the signature requirement. This workflow
-# therefore runs AFTER the admission gate concludes green and merges the probe
-# PR directly.
+# Why a dedicated approver App: `main` here is protected by a ruleset requiring
+# one approving review. The probe PR is opened by the publish token (the
+# maintainer identity), which cannot approve its own PR, and GITHUB_TOKEN
+# (github-actions[bot]) approvals do not count toward the required review — so the
+# PR is permanently BLOCKED with no distinct reviewer. This workflow mints an
+# installation token for a dedicated approver App (a SEPARATE identity from the
+# PR author), approves with it, then squash-merges. GitHub signs the squash commit
+# it creates, satisfying the "require signed commits" rule. The one-review gate on
+# real packages stays fully intact: only a reserved probe PR reaches this path.
 #
 # Fail-closed on every axis:
 #   - only when the admission run CONCLUDED success (a rejected/failed audit
@@ -23,16 +24,23 @@ name: smoke-probe auto-merge
 #     else (the guard below). A real package PR — or a probe PR that also touches
 #     any other path — is left for the maintainer-merge path. The human gate on
 #     what enters the index stays in place.
+#   - the approver App's ownership is backed at admission: the
+#     `ipe-registry-smoke-*` package namespace is reserved to the blessed
+#     first-party publisher, so a third-party PR cannot forge a probe-named entry
+#     that would ride this path. Approve/merge here is the second boundary; the
+#     admission reservation is the first.
 
 on:
   workflow_run:
     workflows: ["admission"]
     types: [completed]
 
-# The direct merge needs contents:write; pull-requests:write to read/merge the PR.
+# The job's own GITHUB_TOKEN stays read-only; every privileged action (approve,
+# merge) uses the dedicated approver App's installation token instead — a distinct
+# identity whose review counts toward the required approval.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: smoke-probe-automerge-${{ github.event.workflow_run.head_branch }}
@@ -40,7 +48,7 @@ concurrency:
 
 jobs:
   merge:
-    name: merge the reserved probe entry once admission is green
+    name: approve + merge the reserved probe entry once admission is green
     # Only a GREEN admission run for a reserved-probe publish branch is eligible.
     # The bad-probe branch (`...-probe-bad-*`) also matches this prefix, but its
     # admission concludes failure, so the success guard turns it away; the
@@ -50,12 +58,24 @@ jobs:
       startsWith(github.event.workflow_run.head_branch, 'publish/ipe-registry-smoke-probe')
     runs-on: ubuntu-latest
     steps:
-      - name: Direct-merge ONLY a probe-only PR (fail-closed otherwise)
+      # Mint an installation access token for the dedicated approver App. This is
+      # a SEPARATE identity from the PR author (the publish token), so its review
+      # satisfies the ruleset's required approving review. The App is installed on
+      # this repo only, with Contents + Pull requests read/write.
+      - name: Mint approver App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.SMOKE_APP_ID }}
+          private-key: ${{ secrets.SMOKE_APP_PRIVATE_KEY }}
+
+      - name: Approve + merge ONLY a probe-only PR (fail-closed otherwise)
         env:
-          GH_TOKEN: ${{ github.token }}
-          # GH_REPO makes every `gh` call resolve over the API, so this job needs
-          # no `actions/checkout`: `gh pr {list,view,merge}` otherwise shell out to
-          # git and fail with "not a git repository".
+          # Every `gh` call runs as the approver App. GH_REPO makes them resolve
+          # over the API, so this job needs no `actions/checkout`: `gh pr
+          # {list,view,review,merge}` otherwise shell out to git and fail with
+          # "not a git repository".
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
@@ -76,9 +96,11 @@ jobs:
             echo "PR #$PR is not a probe-only change — not merging (maintainer merge required)."
             exit 0
           fi
-          # Direct squash merge: GitHub creates + web-flow-signs the squash commit
-          # synchronously, satisfying "require signed commits" where an armed
-          # `--auto` merge stalls. Branch protection still enforces the required
-          # `audit` check — this call fails (loud) if it is not green.
+          # Approve as the App (a distinct identity from the PR author), clearing
+          # the ruleset's required review, then squash-merge. GitHub signs the
+          # squash commit it creates, satisfying "require signed commits". Branch
+          # protection still enforces the required `audit` check — the merge call
+          # fails (loud) if it is not green.
+          gh pr review "$PR" --approve --body "Reserved registry-publish-smoke probe entry; admission concluded green. Auto-approved by the confined smoke approver App."
           gh pr merge "$PR" --squash
-          echo "probe PR #$PR squash-merged."
+          echo "probe PR #$PR approved + squash-merged."
