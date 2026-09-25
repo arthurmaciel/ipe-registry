@@ -28,7 +28,7 @@ permissions:
 # `package.ipe` project format and whose Tier-2 native confinement is proven;
 # advancing it is a one-line bump here.
 env:
-  IPE_VERSION: ipe-v0.2.3
+  IPE_VERSION: ipe-v0.2.5
 
 jobs:
   changed:
