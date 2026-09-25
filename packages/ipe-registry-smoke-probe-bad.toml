@@ -1,0 +1,9 @@
+name = "ipe-registry-smoke-probe-bad"
+publisher = "arthurmaciel"
+
+[[version]]
+version = "0.0.0-smokebad.20260925101034"
+source = "https://github.com/arthurmaciel/ipe-registry-smoke-probe-bad"
+rev = "82e81636ab993fb80b40ea5a733056e89df8c861"
+sha256 = "059a13be1ae55142a0b05bd87efaab9f2f2ae766f88e08ac9a9aede2a76cb23e"
+capabilities = []
