@@ -2,8 +2,8 @@ name = "ipe-registry-smoke-probe"
 publisher = "arthurmaciel"
 
 [[version]]
-version = "0.0.0-smoke.20260925101034"
+version = "0.0.0-smoke.20260926095104"
 source = "https://github.com/arthurmaciel/ipe-registry-smoke-probe"
-rev = "3e4f73688ffa9993d27aef4547d0b6a25c870ea9"
-sha256 = "bd361141d68348e3b146831f9f09e9b19e094e32268ed9b9c07cf46fb687425a"
+rev = "a14134ce1ad855c715067d49bb634ffe902a68e7"
+sha256 = "46d085e242df5848317768482fe4f03cf6fd6c8d87ec2c8cece4ac61654388ef"
 capabilities = []
