@@ -24,6 +24,11 @@ name: smoke-probe auto-merge
 #     else (the guard below). A real package PR — or a probe PR that also touches
 #     any other path — is left for the maintainer-merge path. The human gate on
 #     what enters the index stays in place.
+#   - only for a same-repository branch (never a fork) whose PR is authored by
+#     the blessed first-party publisher, and only at the exact head commit the
+#     green admission run audited (a push after admission cannot ride the merge).
+#     The `publisher` field in the probe entry is self-declared; the PR author
+#     and head repository are GitHub-attested, so they are what this checks;
 #   - the approver App's ownership is backed at admission: the
 #     `ipe-registry-smoke-*` package namespace is reserved to the blessed
 #     first-party publisher, so a third-party PR cannot forge a probe-named entry
@@ -55,6 +60,7 @@ jobs:
     # exact-file guard below is the second, independent line of defense.
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       startsWith(github.event.workflow_run.head_branch, 'publish/ipe-registry-smoke-probe')
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +84,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          # Mirrors `ipe_kernels::BLESSED_PUBLISHER` in ipe-lang.
+          BLESSED_PUBLISHER: arthurmaciel
         run: |
           set -euo pipefail
           # Resolve the open PR for this publish branch. Absent (already merged or
@@ -85,6 +94,19 @@ jobs:
           PR="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR" ]; then
             echo "no open PR for $HEAD_BRANCH — nothing to merge (already merged/closed)."
+            exit 0
+          fi
+          # Fail-closed identity guard: the PR must come from a branch of THIS
+          # repository, be authored by the blessed publisher, and still point at
+          # the commit admission audited. Anything else drops to the
+          # maintainer-merge path.
+          meta="$(gh pr view "$PR" --json author,isCrossRepository,headRepositoryOwner,headRefOid \
+            --jq '[.author.login, (.isCrossRepository|tostring), .headRepositoryOwner.login, .headRefOid] | join(" ")')"
+          read -r author cross head_owner head_oid <<<"$meta"
+          echo "author=$author cross_repo=$cross head_owner=$head_owner head=$head_oid audited=$HEAD_SHA"
+          if [ "$author" != "$BLESSED_PUBLISHER" ] || [ "$cross" != "false" ] \
+             || [ "$head_owner" != "${GITHUB_REPOSITORY%%/*}" ] || [ "$head_oid" != "$HEAD_SHA" ]; then
+            echo "PR #$PR is not a same-repo blessed-publisher probe at the audited commit — not merging (maintainer merge required)."
             exit 0
           fi
           # Fail-closed guard: the PR must change EXACTLY the reserved probe entry
@@ -102,5 +124,5 @@ jobs:
           # protection still enforces the required `audit` check — the merge call
           # fails (loud) if it is not green.
           gh pr review "$PR" --approve --body "Reserved registry-publish-smoke probe entry; admission concluded green. Auto-approved by the confined smoke approver App."
-          gh pr merge "$PR" --squash
+          gh pr merge "$PR" --squash --match-head-commit "$HEAD_SHA"
           echo "probe PR #$PR approved + squash-merged."
